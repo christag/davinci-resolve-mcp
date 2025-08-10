@@ -41,14 +41,12 @@ echo Log file: %LOG_FILE%
 echo.
 
 REM ---------- Init log ----------
-> "%LOG_FILE%" (
-  echo === DaVinci Resolve MCP Installation Log ===
-  echo Date: %date% %time%
-  echo Install directory (project root): %INSTALL_DIR%
-  echo User: %USERNAME%
-  echo System: %OS% %PROCESSOR_ARCHITECTURE%
-  echo.
-)
+> "%LOG_FILE%" echo === DaVinci Resolve MCP Installation Log ===
+>> "%LOG_FILE%" echo Date: %date% %time%
+>> "%LOG_FILE%" echo Install directory ^(project root^): %INSTALL_DIR%
+>> "%LOG_FILE%" echo User: %USERNAME%
+>> "%LOG_FILE%" echo System: %OS% %PROCESSOR_ARCHITECTURE%
+>> "%LOG_FILE%" echo.
 
 goto :main
 
