@@ -17,13 +17,13 @@ We now provide a unified installation script that handles everything automatical
 **macOS/Linux:**
 ```bash
 # Make sure DaVinci Resolve is running, then:
-./install.sh
+./scripts/setup/install.sh
 ```
 
 **Windows:**
 ```bash
 # Make sure DaVinci Resolve is running, then:
-install.bat
+scripts/setup/install.bat
 ```
 
 This new installation script will:

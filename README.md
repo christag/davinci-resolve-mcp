@@ -53,12 +53,12 @@ The easiest way to get started is with our new unified installation script. This
 - Run the installation script:
    **macOS/Linux:**
    ```bash
-   ./install.sh
+   ./scripts/setup/install.sh
    ```
    
    **Windows:**
    ```batch
-   install.bat
+   /scripts/setup/install.bat
    ```
 
 This will:
