@@ -1,306 +1,292 @@
 @echo off
-REM install.bat - One-step installation for DaVinci Resolve MCP Integration
-REM This script handles the entire installation process with improved error detection
+REM ============================================================================
+REM DaVinci Resolve MCP Integration - One-step Installer (Windows, Batch)
+REM - Per-run timestamped log via PowerShell (works on modern Win11)
+REM - Fixed control flow (functions are below; we jump to :main)
+REM - Robust quoting, ANSI colors, and error handling
+REM ============================================================================
 
-setlocal EnableDelayedExpansion
+setlocal EnableExtensions EnableDelayedExpansion
 
-REM Colors for terminal output
-set GREEN=[92m
-set YELLOW=[93m
-set BLUE=[94m
-set RED=[91m
-set BOLD=[1m
-set NC=[0m
+REM ---------- ANSI colors ----------
+for /F %%A in ('echo prompt $E^| cmd') do set "ESC=%%A"
+set "C_GRN=%ESC%[92m"
+set "C_YEL=%ESC%[93m"
+set "C_BLU=%ESC%[94m"
+set "C_RED=%ESC%[91m"
+set "C_BLD=%ESC%[1m"
+set "C_RST=%ESC%[0m"
 
-REM Get the absolute path of this script's location
-set "INSTALL_DIR=%~dp0"
-set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
+REM ---------- Paths ----------
+REM Resolve project root from this script location: scripts\setup\ -> project root is two levels up
+for %%I in ("%~dp0..\..") do set "INSTALL_DIR=%%~fI"
 set "VENV_DIR=%INSTALL_DIR%\venv"
+set "LOGS_DIR=%INSTALL_DIR%\logs"
 set "CURSOR_CONFIG_DIR=%APPDATA%\Cursor\mcp"
 set "CURSOR_CONFIG_FILE=%CURSOR_CONFIG_DIR%\config.json"
 set "PROJECT_CURSOR_DIR=%INSTALL_DIR%\.cursor"
 set "PROJECT_CONFIG_FILE=%PROJECT_CURSOR_DIR%\mcp.json"
-set "LOG_FILE=%INSTALL_DIR%\install.log"
 
-REM Banner
-echo %BLUE%%BOLD%=================================================%NC%
-echo %BLUE%%BOLD%  DaVinci Resolve MCP Integration Installer      %NC%
-echo %BLUE%%BOLD%=================================================%NC%
-echo %YELLOW%Installation directory: %INSTALL_DIR%%NC%
-echo Installation log: %LOG_FILE%
+REM ---------- Get timestamp for a fresh log (no WMIC, use PowerShell) ----------
+for /f %%I in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyyMMdd_HHmmss')"') do set "LOG_TS=%%I"
+if not exist "%LOGS_DIR%" mkdir "%LOGS_DIR%" >nul 2>&1
+set "LOG_FILE=%LOGS_DIR%\install_%LOG_TS%.log"
+
+REM ---------- Banner ----------
+echo %C_BLU%%C_BLD%=================================================%C_RST%
+echo %C_BLU%%C_BLD%  DaVinci Resolve MCP Integration Installer      %C_RST%
+echo %C_BLU%%C_BLD%=================================================%C_RST%
+echo %C_YEL%Installation directory:%C_RST% %INSTALL_DIR%
+echo Log file: %LOG_FILE%
 echo.
 
-REM Initialize log
-echo === DaVinci Resolve MCP Installation Log === > "%LOG_FILE%"
-echo Date: %date% %time% >> "%LOG_FILE%"
-echo Install directory: %INSTALL_DIR% >> "%LOG_FILE%"
-echo User: %USERNAME% >> "%LOG_FILE%"
-echo System: %OS% Windows %PROCESSOR_ARCHITECTURE% >> "%LOG_FILE%"
-echo. >> "%LOG_FILE%"
+REM ---------- Init log ----------
+> "%LOG_FILE%" (
+  echo === DaVinci Resolve MCP Installation Log ===
+  echo Date: %date% %time%
+  echo Install directory (project root): %INSTALL_DIR%
+  echo User: %USERNAME%
+  echo System: %OS% %PROCESSOR_ARCHITECTURE%
+  echo.
+)
 
-REM Function to log messages (call :log "Message")
+goto :main
+
+:: ---------------------------------------------------------------------------
+:: FUNCTIONS
+:: ---------------------------------------------------------------------------
+
 :log
-echo [%time%] %~1 >> "%LOG_FILE%"
+REM usage: call :log "message"
+>>"%LOG_FILE%" echo [%time%] %~1
 exit /b 0
 
-REM Check if DaVinci Resolve is running
+:say
+REM safe echo for use inside blocks; usage: call :say "text"
+REM Avoids parser issues with parentheses
+echo(%~1
+exit /b 0
+
 :check_resolve_running
 call :log "Checking if DaVinci Resolve is running"
-echo %YELLOW%Checking if DaVinci Resolve is running... %NC%
-
-tasklist /FI "IMAGENAME eq Resolve.exe" 2>NUL | find /I /N "Resolve.exe">NUL
-if %ERRORLEVEL% == 0 (
-    echo %GREEN%OK%NC%
-    call :log "DaVinci Resolve is running"
-    set RESOLVE_RUNNING=1
+echo %C_YEL%Checking if DaVinci Resolve is running...%C_RST%
+tasklist /FI "IMAGENAME eq Resolve.exe" 2>nul | find /I "Resolve.exe" >nul
+if errorlevel 1 (
+  echo %C_RED%NOT RUNNING%C_RST%
+  echo %C_YEL%Resolve is not running. Some integration checks will be skipped.%C_RST%
+  call :log "Resolve not running (continuing)"
+  set "RESOLVE_RUNNING=0"
 ) else (
-    echo %RED%NOT RUNNING%NC%
-    echo %YELLOW%DaVinci Resolve must be running to complete the installation.%NC%
-    echo %YELLOW%Please start DaVinci Resolve and try again.%NC%
-    call :log "DaVinci Resolve is not running - installation cannot proceed"
-    set RESOLVE_RUNNING=0
+  echo %C_GRN%OK%C_RST%
+  call :log "Resolve is running"
+  set "RESOLVE_RUNNING=1"
 )
-exit /b %RESOLVE_RUNNING%
+exit /b 0
 
-REM Create Python virtual environment
 :create_venv
-call :log "Creating/checking Python virtual environment"
-echo %YELLOW%Setting up Python virtual environment... %NC%
-
+call :log "Ensuring Python virtual environment"
+echo %C_YEL%Setting up Python virtual environment...%C_RST%
 if exist "%VENV_DIR%\Scripts\python.exe" (
-    echo %GREEN%ALREADY EXISTS%NC%
-    call :log "Virtual environment already exists"
-    set VENV_STATUS=1
-) else (
-    echo %YELLOW%CREATING%NC%
-    python -m venv "%VENV_DIR%" >> "%LOG_FILE%" 2>&1
-    
-    if %ERRORLEVEL% == 0 (
-        echo %GREEN%OK%NC%
-        call :log "Virtual environment created successfully"
-        set VENV_STATUS=1
-    ) else (
-        echo %RED%FAILED%NC%
-        echo %RED%Failed to create Python virtual environment.%NC%
-        echo %YELLOW%Check that Python 3.9+ is installed.%NC%
-        call :log "Failed to create virtual environment"
-        set VENV_STATUS=0
-    )
+  echo %C_GRN%OK%C_RST%
+  call :log "Venv already exists"
+  exit /b 0
 )
-exit /b %VENV_STATUS%
 
-REM Install MCP SDK
+python -V >nul 2>&1 || py -V >nul 2>&1
+if errorlevel 1 (
+  echo %C_RED%FAILED%C_RST%
+  echo %C_RED%Python 3.9+ not found on PATH.%C_RST%
+  call :log "Python not found on PATH"
+  exit /b 1
+)
+
+python -m venv "%VENV_DIR%" >>"%LOG_FILE%" 2>&1 || py -m venv "%VENV_DIR%" >>"%LOG_FILE%" 2>&1
+if errorlevel 1 (
+  echo %C_RED%FAILED%C_RST%
+  call :log "Venv creation failed"
+  exit /b 1
+)
+echo %C_GRN%OK%C_RST%
+call :log "Venv created"
+exit /b 0
+
 :install_mcp
-call :log "Installing MCP SDK"
-echo %YELLOW%Installing MCP SDK... %NC%
-
-"%VENV_DIR%\Scripts\pip" install "mcp[cli]" >> "%LOG_FILE%" 2>&1
-
-if %ERRORLEVEL% == 0 (
-    echo %GREEN%OK%NC%
-    call :log "MCP SDK installed successfully"
-    set MCP_STATUS=1
-) else (
-    echo %RED%FAILED%NC%
-    echo %RED%Failed to install MCP SDK.%NC%
-    echo %YELLOW%Check the log file for details: %LOG_FILE%%NC%
-    call :log "Failed to install MCP SDK"
-    set MCP_STATUS=0
+call :log "Installing MCP SDK into venv"
+echo %C_YEL%Installing MCP SDK...%C_RST%
+set "PIP_EXE=%VENV_DIR%\Scripts\pip.exe"
+if not exist "%PIP_EXE%" (
+  echo %C_RED%FAILED%C_RST%
+  call :log "pip.exe not found in venv"
+  exit /b 1
 )
-exit /b %MCP_STATUS%
+"%PIP_EXE%" install --upgrade pip >>"%LOG_FILE%" 2>&1
+"%PIP_EXE%" install "mcp[cli]" >>"%LOG_FILE%" 2>&1
+  if exist "%INSTALL_DIR%\requirements.txt" (
+    call :log "requirements.txt found; installing project dependencies"
+    "%PIP_EXE%" install -r "%INSTALL_DIR%\requirements.txt" >>"%LOG_FILE%" 2>&1
+  ) else (
+    call :log "requirements.txt not found; skipping project dependency install"
+  )
+if errorlevel 1 (
+  echo %C_RED%FAILED%C_RST%
+  call :log "MCP SDK install failed"
+  exit /b 1
+)
+echo %C_GRN%OK%C_RST%
+call :log "MCP SDK installed"
+exit /b 0
 
-REM Set environment variables
 :setup_env_vars
-call :log "Setting up environment variables"
-echo %YELLOW%Setting up environment variables... %NC%
-
-REM Generate environment variables file
+call :log "Writing .env.bat and setting session vars"
+echo %C_YEL%Setting up environment variables...%C_RST%
+set "RESOLVE_SCRIPT_API=C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting"
+set "RESOLVE_SCRIPT_LIB=C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll"
 set "ENV_FILE=%INSTALL_DIR%\.env.bat"
-(
-    echo @echo off
-    echo set "RESOLVE_SCRIPT_API=C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting"
-    echo set "RESOLVE_SCRIPT_LIB=C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll"
-    echo set "PYTHONPATH=%%PYTHONPATH%%;%%RESOLVE_SCRIPT_API%%\Modules"
-) > "%ENV_FILE%"
 
-REM Source the environment variables
+> "%ENV_FILE%" (
+  echo @echo off
+  echo rem DaVinci Resolve Scripting
+  echo set "RESOLVE_SCRIPT_API=%RESOLVE_SCRIPT_API%"
+  echo set "RESOLVE_SCRIPT_LIB=%RESOLVE_SCRIPT_LIB%"
+  echo set "PYTHONPATH=%%PYTHONPATH%%;%%RESOLVE_SCRIPT_API%%\Modules"
+)
+
 call "%ENV_FILE%"
+if errorlevel 1 (
+  echo %C_RED%FAILED%C_RST%
+  call :log ".env.bat load failed"
+  exit /b 1
+)
+echo %C_GRN%OK%C_RST%
+call :log "ENV set (session)"
+exit /b 0
 
-echo %GREEN%OK%NC%
-call :log "Environment variables set:"
-call :log "RESOLVE_SCRIPT_API=%RESOLVE_SCRIPT_API%"
-call :log "RESOLVE_SCRIPT_LIB=%RESOLVE_SCRIPT_LIB%"
-
-REM Suggest adding to system variables
-echo %YELLOW%Consider adding these environment variables to your system:%NC%
-echo %BLUE%  RESOLVE_SCRIPT_API = C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting%NC%
-echo %BLUE%  RESOLVE_SCRIPT_LIB = C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll%NC%
-echo %BLUE%  Add to PYTHONPATH: %%RESOLVE_SCRIPT_API%%\Modules%NC%
-
-exit /b 1
-
-REM Setup Cursor MCP configuration
 :setup_cursor_config
-call :log "Setting up Cursor MCP configuration"
-echo %YELLOW%Setting up Cursor MCP configuration... %NC%
+call :log "Creating Cursor MCP configs"
+echo %C_YEL%Setting up Cursor MCP configuration...%C_RST%
+if not exist "%CURSOR_CONFIG_DIR%" mkdir "%CURSOR_CONFIG_DIR%" >nul 2>&1
+if errorlevel 1 (
+  echo %C_RED%FAILED%C_RST%
+  call :log "Unable to create %CURSOR_CONFIG_DIR%"
+  exit /b 1
+)
+if not exist "%PROJECT_CURSOR_DIR%" mkdir "%PROJECT_CURSOR_DIR%" >nul 2>&1
 
-REM Create system-level directory if it doesn't exist
-if not exist "%CURSOR_CONFIG_DIR%" mkdir "%CURSOR_CONFIG_DIR%"
+  set "PY_CMD=%INSTALL_DIR:\=\\%\\venv\\Scripts\\python.exe"
+  set "SVR_CMD=%INSTALL_DIR:\=\\%\\src\\resolve_mcp_server.py"
 
-REM Create system-level config file with the absolute paths
-(
-    echo {
-    echo   "mcpServers": {
-    echo     "davinci-resolve": {
-    echo       "name": "DaVinci Resolve MCP",
-    echo       "command": "%INSTALL_DIR:\=\\%\\venv\\Scripts\\python.exe",
-    echo       "args": ["%INSTALL_DIR:\=\\%\\resolve_mcp_server.py"]
-    echo     }
-    echo   }
-    echo }
-) > "%CURSOR_CONFIG_FILE%"
+> "%CURSOR_CONFIG_FILE%" (
+  echo {
+  echo   "mcpServers": {
+  echo     "davinci-resolve": {
+  echo       "name": "DaVinci Resolve MCP",
+  echo       "command": "%PY_CMD%",
+  echo       "args": ["%SVR_CMD%"]
+  echo     }
+  echo   }
+  echo }
+)
 
-REM Create project-level directory if it doesn't exist
-if not exist "%PROJECT_CURSOR_DIR%" mkdir "%PROJECT_CURSOR_DIR%"
-
-REM Create project-level config with absolute paths (same as system-level config)
-(
-    echo {
-    echo   "mcpServers": {
-    echo     "davinci-resolve": {
-    echo       "name": "DaVinci Resolve MCP",
-    echo       "command": "%INSTALL_DIR:\=\\%\\venv\\Scripts\\python.exe",
-    echo       "args": ["%INSTALL_DIR:\=\\%\\resolve_mcp_server.py"]
-    echo     }
-    echo   }
-    echo }
-) > "%PROJECT_CONFIG_FILE%"
+> "%PROJECT_CONFIG_FILE%" (
+  echo {
+  echo   "mcpServers": {
+  echo     "davinci-resolve": {
+  echo       "name": "DaVinci Resolve MCP",
+  echo       "command": "%PY_CMD%",
+  echo       "args": ["%SVR_CMD%"]
+  echo     }
+  echo   }
+  echo }
+)
 
 if exist "%CURSOR_CONFIG_FILE%" if exist "%PROJECT_CONFIG_FILE%" (
-    echo %GREEN%OK%NC%
-    echo %GREEN%Cursor MCP config created at: %CURSOR_CONFIG_FILE%%NC%
-    echo %GREEN%Project MCP config created at: %PROJECT_CONFIG_FILE%%NC%
-    call :log "Cursor MCP configuration created successfully"
-    call :log "System config file: %CURSOR_CONFIG_FILE%"
-    call :log "Project config file: %PROJECT_CONFIG_FILE%"
-    
-    REM Show the paths that were set
-    echo %YELLOW%Paths configured:%NC%
-    echo %BLUE%  Python: %INSTALL_DIR%\venv\Scripts\python.exe%NC%
-    echo %BLUE%  Script: %INSTALL_DIR%\resolve_mcp_server.py%NC%
-    
-    set CONFIG_STATUS=1
+  echo %C_GRN%OK%C_RST%
+  call :log "Cursor configs written"
+  exit /b 0
 ) else (
-    echo %RED%FAILED%NC%
-    echo %RED%Failed to create Cursor MCP configuration.%NC%
-    call :log "Failed to create Cursor MCP configuration"
-    set CONFIG_STATUS=0
+  echo %C_RED%FAILED%C_RST%
+  call :log "Cursor config write failed"
+  exit /b 1
 )
-exit /b %CONFIG_STATUS%
 
-REM Verify installation
 :verify_installation
-call :log "Verifying installation"
-echo %BLUE%%BOLD%=================================================%NC%
-echo %YELLOW%%BOLD%Verifying installation...%NC%
-
-REM Run the verification script
+call :log "Running verification script"
+echo %C_BLU%%C_BLD%=================================================%C_RST%
+echo %C_YEL%%C_BLD%Verifying installation...%C_RST%
+if not exist "%INSTALL_DIR%\scripts\verify-installation.bat" (
+  call :log "verify-installation.bat not found, skipping"
+  echo %C_YEL%No verification script found. Skipping.%C_RST%
+  exit /b 0
+)
 call "%INSTALL_DIR%\scripts\verify-installation.bat"
-set VERIFY_RESULT=%ERRORLEVEL%
+set "VERIFY_RESULT=%ERRORLEVEL%"
+call :log "Verification result: !VERIFY_RESULT!"
+exit /b !VERIFY_RESULT!
 
-call :log "Verification completed with result: %VERIFY_RESULT%"
-
-exit /b %VERIFY_RESULT%
-
-REM Run server if verification succeeds
 :run_server
 call :log "Starting server"
-echo %BLUE%%BOLD%=================================================%NC%
-echo %GREEN%%BOLD%Starting DaVinci Resolve MCP Server...%NC%
+echo %C_BLU%%C_BLD%=================================================%C_RST%
+echo %C_GRN%%C_BLD%Starting DaVinci Resolve MCP Server...%C_RST%
 echo.
+"%VENV_DIR%\Scripts\python.exe" "%INSTALL_DIR%\src\resolve_mcp_server.py"
+set "SERVER_EXIT=%ERRORLEVEL%"
+call :log "Server exited with code: !SERVER_EXIT!"
+exit /b !SERVER_EXIT!
 
-REM Run the server using the virtual environment
-"%VENV_DIR%\Scripts\python.exe" "%INSTALL_DIR%\resolve_mcp_server.py"
-
-set SERVER_EXIT=%ERRORLEVEL%
-call :log "Server exited with code: %SERVER_EXIT%"
-
-exit /b %SERVER_EXIT%
-
-REM Main installation process
+:: ---------------------------------------------------------------------------
+:: MAIN
+:: ---------------------------------------------------------------------------
 :main
 call :log "Starting installation process"
 
-REM Check if DaVinci Resolve is running
 call :check_resolve_running
-if %RESOLVE_RUNNING% == 0 (
-    echo %YELLOW%Waiting 10 seconds for DaVinci Resolve to start...%NC%
-    timeout /t 10 /nobreak > nul
-    call :check_resolve_running
-    if %RESOLVE_RUNNING% == 0 (
-        call :log "Installation aborted - DaVinci Resolve not running"
-        echo %RED%Installation aborted.%NC%
-        exit /b 1
-    )
-)
 
-REM Create virtual environment
 call :create_venv
-if %VENV_STATUS% == 0 (
-    call :log "Installation aborted - virtual environment setup failed"
-    echo %RED%Installation aborted.%NC%
-    exit /b 1
+if errorlevel 1 (
+  call :log "Abort: venv setup failed"
+  call :say "%C_RED%Installation aborted (venv).%C_RST%"
+  exit /b 1
 )
 
-REM Install MCP SDK
 call :install_mcp
-if %MCP_STATUS% == 0 (
-    call :log "Installation aborted - MCP SDK installation failed"
-    echo %RED%Installation aborted.%NC%
-    exit /b 1
+if errorlevel 1 (
+  call :log "Abort: MCP SDK install failed"
+    call :say "%C_RED%Installation aborted (MCP SDK).%C_RST%"
+  exit /b 1
 )
 
-REM Set up environment variables
 call :setup_env_vars
+if errorlevel 1 (
+  call :log "Abort: env var setup failed"
+  call :say "%C_RED%Installation aborted (env).%C_RST%"
+  exit /b 1
+)
 
-REM Set up Cursor configuration
 call :setup_cursor_config
-if %CONFIG_STATUS% == 0 (
-    call :log "Installation aborted - Cursor configuration failed"
-    echo %RED%Installation aborted.%NC%
-    exit /b 1
+if errorlevel 1 (
+  call :log "Abort: Cursor config failed"
+  call :say "%C_RED%Installation aborted (Cursor config).%C_RST%"
+  exit /b 1
 )
 
-REM Verify installation
 call :verify_installation
-set VERIFY_RESULT=%ERRORLEVEL%
-if %VERIFY_RESULT% NEQ 0 (
-    call :log "Installation completed with verification warnings"
-    echo %YELLOW%Installation completed with warnings.%NC%
-    echo %YELLOW%Please fix any issues before starting the server.%NC%
-    echo %YELLOW%You can run the verification script again:%NC%
-    echo %BLUE%  scripts\verify-installation.bat%NC%
-    exit /b 1
+if errorlevel 1 (
+  call :log "Completed with verification warnings"
+  call :say "%C_YEL%Installation completed with warnings.%C_RST%"
+    call :say "%C_YEL%Fix issues then re-run verification:%C_RST% scripts\\verify-installation.bat"
+  exit /b 1
 )
 
-REM Installation successful
 call :log "Installation completed successfully"
-echo %GREEN%%BOLD%Installation completed successfully!%NC%
-echo %YELLOW%You can now start the server with:%NC%
-echo %BLUE%  run-now.bat%NC%
-
-REM Ask if the user wants to start the server now
+call :say "%C_GRN%%C_BLD%Installation completed successfully!%C_RST%"
+call :say "%C_YEL%Start the server with:%C_RST% run-now.bat"
 echo.
 set /p START_SERVER="Do you want to start the server now? (y/n) "
-if /i "%START_SERVER%" == "y" (
-    call :run_server
+if /I "%START_SERVER%"=="y" (
+  call :run_server
 ) else (
-    call :log "User chose not to start the server"
-    echo %YELLOW%You can start the server later with:%NC%
-    echo %BLUE%  run-now.bat%NC%
+  call :log "User chose not to start the server"
+  echo %C_YEL%You can start later with:%C_RST% run-now.bat
 )
 
 exit /b 0
-
-REM Call the main process
-call :main 
